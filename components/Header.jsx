@@ -32,6 +32,7 @@ export default function Header() {
           {me?.admin && <L href="/admin">🛠 Admin upload</L>}
           {me && <L href="/profile">🙂 My profile</L>}
           {me && <L href="/friends">👥 Friends & chat</L>}
+          {me && <L href="/chats">💬 Messages</L>}
           {me ? <button onClick={out} className={cls}>🚪 Log out</button> : <L href="/login">👤 Log in / Sign up</L>}
         </nav>
       )}

@@ -42,8 +42,10 @@ export default function Friends() {
     const p = people[id] || found.find(x => x.id === id)
     return (
       <div className="card flex items-center gap-3">
-        <Avatar path={p?.avatar_path} name={p?.username} />
-        <b className="min-w-0 flex-1 truncate">{p?.username || 'Reader'}</b>
+ <Link href={`/u/${id}`} className="flex min-w-0 flex-1 items-center gap-3">
+  <Avatar path={p?.avatar_path} name={p?.username} />
+  <b className="truncate">{p?.username || 'Reader'}</b>
+</Link>
         {children}
       </div>
     )

@@ -30,7 +30,8 @@ export default function Home() {
               : <div className="flex h-36 w-24 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-3xl dark:bg-slate-800">📖</div>}
             <div className="min-w-0 flex-1">
               <span className="text-sm text-indigo-600 dark:text-indigo-300">{i.category} · {i.format}</span>
-              <h3 className="text-lg font-bold">{i.title}</h3>
+              <Link href={`/book/${i.id}`} className="block text-lg font-bold hover:underline">{i.title}</Link>
+<Link href={`/book/${i.id}`} className="block text-lg font-bold hover:underline">{i.title}</Link>
               <p className="text-sm opacity-70">{i.author}</p>
               <p className="mt-1 line-clamp-2 text-sm">{i.description}</p>
               <div className="mt-3 flex gap-2">

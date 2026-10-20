@@ -7,7 +7,7 @@ const cls = 'block w-full rounded-xl bg-indigo-100 px-4 py-3 text-left font-semi
 export default function Header() {
   const [open, setOpen] = useState(false), [me, setMe] = useState(null), router = useRouter()
   useEffect(() => {
-    getMe().then(setMe)
+    getMe().then(m => { setMe(m); if (m) supabase.rpc('award_xp', { k: 'daily' }).then(() => {}) })
     const { data: s } = supabase.auth.onAuthStateChange(() => getMe().then(setMe))
     return () => s.subscription.unsubscribe()
   }, [])
@@ -33,6 +33,7 @@ export default function Header() {
           {me && <L href="/profile">🙂 My profile</L>}
           {me && <L href="/friends">👥 Friends & chat</L>}
           {me && <L href="/chats">💬 Messages</L>}
+          {me && <L href="/leaderboard">🏆 Leaderboard</L>}
           {me ? <button onClick={out} className={cls}>🚪 Log out</button> : <L href="/login">👤 Log in / Sign up</L>}
         </nav>
       )}

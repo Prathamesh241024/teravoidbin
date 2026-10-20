@@ -92,7 +92,8 @@ export default function Read({ params }) {
           <div className="flex items-center gap-2">
             <button className="btn" onClick={() => router.push('/')}>← Back</button>
             <h1 className="min-w-0 flex-1 truncate font-bold">{item.title}</h1>
-            <button className="btn" onClick={() => download(item)}>⬇</button>
+            <button className="btn" onClick={() => download(item)}>⬇</button> 
+            <button className="btn" onClick={() => router.push('/book/' + item.id)}>💬</button>
             {epub && <button className="btn" onClick={() => { setBmOpen(!bmOpen); setPanel(false) }}>🔖</button>}
             {epub && <button className="btn" onClick={() => { setPanel(!panel); setBmOpen(false) }}>⚙</button>}
           </div>

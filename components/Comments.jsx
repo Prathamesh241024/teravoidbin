@@ -38,7 +38,7 @@ export default function Comments({ itemId }) {
         const p = people[c.user_id]
         return (
           <div key={c.id} className="card flex gap-3">
-            <Avatar path={p?.avatar_path} name={p?.username} />
+            <Link href={`/u/${c.user_id}`}><Avatar path={p?.avatar_path} name={p?.username} /></Link>
             <div className="min-w-0 flex-1">
               <div className="flex items-center justify-between text-sm"><b>{p?.username || 'Reader'}</b><span className="opacity-60">{new Date(c.created_at).toLocaleString()}</span></div>
               <p className="whitespace-pre-wrap break-words">{c.body}</p>

@@ -21,6 +21,7 @@ export default function Read({ params }) {
       if (!it) return router.push('/')
       setItem(it)
       await supabase.from('events').insert({ item_id: it.id, kind: 'read' })
+      await supabase.rpc('award_xp', { k: 'read', r: it.id })
       const { data: m } = await supabase.from('bookmarks').select('*').eq('item_id', it.id).order('created_at', { ascending: false })
       setMarks(m || [])
       const { data: s } = await supabase.storage.from('library').createSignedUrl(it.file_path, 3600)

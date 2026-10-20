@@ -20,7 +20,7 @@ export default function Comments({ itemId }) {
     if (!text.trim()) return
     const { error } = await supabase.from('comments').insert({ item_id: itemId, body: text.trim() })
     if (error) return setMsg(error.message)
-    setText(''); setMsg(''); load()
+    await supabase.rpc('award_xp', { k: 'comment' }); setText(''); setMsg(''); load()
   }
   const del = async id => { await supabase.from('comments').delete().eq('id', id); load() }
   if (!me) return <p className="card text-sm">Log in to read and write comments.</p>
@@ -40,7 +40,10 @@ export default function Comments({ itemId }) {
           <div key={c.id} className="card flex gap-3">
             <Link href={`/u/${c.user_id}`}><Avatar path={p?.avatar_path} name={p?.username} /></Link>
             <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between text-sm"><b>{p?.username || 'Reader'}</b><span className="opacity-60">{new Date(c.created_at).toLocaleString()}</span></div>
+              <div className="flex items-center justify-between text-sm">
+                <Link href={`/u/${c.user_id}`} className="font-bold">{p?.username || 'Reader'}</Link>
+                <span className="opacity-60">{new Date(c.created_at).toLocaleString()}</span>
+              </div>
               <p className="whitespace-pre-wrap break-words">{c.body}</p>
               {(me.user.id === c.user_id || me.admin) && <button className="text-sm text-red-500" onClick={() => del(c.id)}>Delete</button>}
             </div>

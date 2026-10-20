@@ -3,10 +3,11 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { supabase, getMe } from '@/lib/supabase'
+import { levelInfo } from '@/lib/level'
 import Avatar from '@/components/Avatar'
 export default function UserProfile({ params }) {
   const uid = params.id
-  const [me, setMe] = useState(null), [p, setP] = useState(null), [stats, setStats] = useState(null), [rel, setRel] = useState(null), [msg, setMsg] = useState(''), [missing, setMissing] = useState(false), router = useRouter()
+  const [me, setMe] = useState(null), [p, setP] = useState(null), [stats, setStats] = useState(null), [rel, setRel] = useState(null), [xp, setXp] = useState(0), [rank, setRank] = useState(null), [msg, setMsg] = useState(''), [missing, setMissing] = useState(false), router = useRouter()
   const load = async () => {
     const { data } = await supabase.from('public_profiles').select('*').eq('id', uid).single()
     if (!data) return setMissing(true)
@@ -15,6 +16,11 @@ export default function UserProfile({ params }) {
     setStats(s)
     const { data: r } = await supabase.from('friendships').select('*').or(`requester.eq.${uid},addressee.eq.${uid}`)
     setRel((r || [])[0] || null)
+    const { data: x } = await supabase.from('user_xp').select('xp').eq('user_id', uid).maybeSingle()
+    const v = x?.xp || 0
+    setXp(v)
+    const { count } = await supabase.from('user_xp').select('*', { count: 'exact', head: true }).gt('xp', v)
+    setRank((count || 0) + 1)
   }
   useEffect(() => { getMe().then(m => { if (!m) return router.push('/login'); setMe(m); load() }) }, [uid])
   const add = async () => {
@@ -27,10 +33,16 @@ export default function UserProfile({ params }) {
   if (missing) return <p className="pt-8">User not found.</p>
   if (!p || !me) return <p className="pt-8">Loading…</p>
   const self = me.user.id === uid
+  const lv = levelInfo(xp)
   return (
     <div className="card mx-auto mt-8 max-w-sm space-y-4 text-center">
       <div className="flex justify-center"><Avatar path={p.avatar_path} name={p.username} size={112} /></div>
       <h1 className="text-2xl font-bold">{p.username || 'Reader'}</h1>
+      <div>
+        <div className="text-sm font-semibold">⭐ Level {lv.level} · {xp} XP{xp > 0 && rank ? ` · Rank #${rank}` : ''}</div>
+        <div className="mt-1 h-2 overflow-hidden rounded-full bg-indigo-100 dark:bg-slate-800"><div className="h-full bg-indigo-600" style={{ width: lv.pct + '%' }} /></div>
+        <div className="mt-1 text-xs opacity-60">{lv.need - lv.into} XP to level {lv.level + 1}</div>
+      </div>
       <div className="flex justify-around">
         <div><div className="text-2xl font-bold">{stats?.friends ?? 0}</div><div className="text-sm opacity-70">Friends</div></div>
         <div><div className="text-sm font-semibold">{stats?.joined ? new Date(stats.joined).toLocaleDateString() : '—'}</div><div className="text-sm opacity-70">Joined</div></div>

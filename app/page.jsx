@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { supabase, getMe, download } from '@/lib/supabase'
 const CATS = [['all', '📚 All'], ['paper', '🧬 Papers'], ['novel', '📖 Novels'], ['manga', '🎌 Manga'], ['book', '📕 Books']]
+const cover = p => p ? supabase.storage.from('covers').getPublicUrl(p).data.publicUrl : null
 export default function Home() {
   const [q, setQ] = useState(''), [cat, setCat] = useState('all'), [items, setItems] = useState([]), [me, setMe] = useState(null)
   useEffect(() => { getMe().then(setMe) }, [])
@@ -23,14 +24,19 @@ export default function Home() {
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         {items.map(i => (
-          <div key={i.id} className="card">
-            <span className="text-sm text-indigo-600 dark:text-indigo-300">{i.category} · {i.format}</span>
-            <h3 className="text-lg font-bold">{i.title}</h3>
-            <p className="text-sm opacity-70">{i.author}</p>
-            <p className="mt-1 line-clamp-2 text-sm">{i.description}</p>
-            <div className="mt-3 flex gap-2">
-              {me ? <><Link className="btn" href={`/read/${i.id}`}>Read</Link><button className="btn" onClick={() => download(i)}>Download</button></>
-                  : <Link className="btn" href="/login">Sign up to read</Link>}
+          <div key={i.id} className="card flex gap-3">
+            {cover(i.cover_path)
+              ? <img src={cover(i.cover_path)} alt="" className="h-36 w-24 shrink-0 rounded-lg object-cover" />
+              : <div className="flex h-36 w-24 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-3xl dark:bg-slate-800">📖</div>}
+            <div className="min-w-0 flex-1">
+              <span className="text-sm text-indigo-600 dark:text-indigo-300">{i.category} · {i.format}</span>
+              <h3 className="text-lg font-bold">{i.title}</h3>
+              <p className="text-sm opacity-70">{i.author}</p>
+              <p className="mt-1 line-clamp-2 text-sm">{i.description}</p>
+              <div className="mt-3 flex gap-2">
+                {me ? <><Link className="btn" href={`/read/${i.id}`}>Read</Link><button className="btn" onClick={() => download(i)}>Download</button></>
+                    : <Link className="btn" href="/login">Sign up to read</Link>}
+              </div>
             </div>
           </div>
         ))}

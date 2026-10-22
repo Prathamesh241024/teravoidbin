@@ -4,10 +4,19 @@ import { useRouter } from 'next/navigation'
 import { supabase, getMe, download } from '@/lib/supabase'
 
 export default function Read({ params }) {
-  const [item, setItem] = useState(null), [url, setUrl] = useState(''), [chapters, setChapters] = useState([]), [ready, setReady] = useState(false)
+  const [item, setItem] = useState(null), [url, setUrl] = useState(''), [chapters, setChapters] = useState([]), [ready, setReady] = useState(false), [err, setErr] = useState('')
   const [bg, setBg] = useState(''), [tone, setTone] = useState('dark'), [dim, setDim] = useState(0.6), [size, setSize] = useState(110), [panel, setPanel] = useState(false), [jump, setJump] = useState('')
   const [marks, setMarks] = useState([]), [bmOpen, setBmOpen] = useState(false)
-  const box = useRef(), rend = useRef(), loc = useRef({}), router = useRouter()
+  const box = useRef(), rend = useRef(), loc = useRef({}), openRef = useRef(), themeRef = useRef({}), router = useRouter()
+  themeRef.current = { tone, size }
+
+  const applyTheme = () => {
+    const r = rend.current; if (!r) return
+    const { tone: t, size: s } = themeRef.current
+    r.themes.override('color', t === 'dark' ? '#f2f2f2' : '#111111', true)
+    r.themes.override('background', 'transparent', true)
+    r.themes.fontSize(s + '%')
+  }
 
   useEffect(() => {
     try { const s = JSON.parse(localStorage.reader || '{}'); if (s.bg) setBg(s.bg); if (s.tone) setTone(s.tone); if (s.dim != null) setDim(s.dim); if (s.size) setSize(s.size) } catch {}
@@ -27,32 +36,41 @@ export default function Read({ params }) {
       const { data: s } = await supabase.storage.from('library').createSignedUrl(it.file_path, 3600)
       setUrl(s.signedUrl)
       if (it.format !== 'epub') return
-      const ePub = (await import('epubjs')).default
-      const buf = await (await fetch(s.signedUrl)).arrayBuffer()
-      const book = ePub(buf)
-      rend.current = book.renderTo(box.current, { width: '100%', height: '100%', flow: 'scrolled-doc' })
-      rend.current.on('relocated', l => {
-        loc.current = { cfi: l.start.cfi, href: l.start.href }
-        try { localStorage.setItem('pos:' + it.id, l.start.cfi) } catch {}
-      })
-      let saved; try { saved = localStorage.getItem('pos:' + it.id) } catch {}
-      try { await rend.current.display(saved || undefined) } catch { await rend.current.display() }
-      setReady(true)
       try {
-        const nav = await book.loaded.navigation
-        let list = nav.toc.map(c => ({ label: c.label.trim(), href: c.href }))
-        if (!list.length) { const sp = await book.loaded.spine; list = sp.spineItems.map((x, i) => ({ label: `Section ${i + 1}`, href: x.href })) }
-        setChapters(list)
-      } catch {}
+        const ePub = (await import('epubjs')).default
+        const buf = await (await fetch(s.signedUrl)).arrayBuffer()
+        const book = ePub(buf)
+        await book.ready
+        const fixed = book.packaging?.metadata?.layout === 'pre-paginated'
+        openRef.current = async mode => {
+          try { rend.current?.destroy() } catch {}
+          if (box.current) box.current.innerHTML = ''
+          rend.current = book.renderTo(box.current, mode === 'page'
+            ? { width: '100%', height: '100%', flow: 'paginated', spread: 'none' }
+            : { width: '100%', height: '100%', flow: 'scrolled-doc' })
+          rend.current.on('relocated', l => {
+            loc.current = { cfi: l.start.cfi, href: l.start.href }
+            try { localStorage.setItem('pos:' + it.id, l.start.cfi) } catch {}
+          })
+          let saved; try { saved = localStorage.getItem('pos:' + it.id) } catch {}
+          try { await rend.current.display(saved || undefined) } catch { await rend.current.display() }
+          applyTheme()
+          setReady(true)
+        }
+        await openRef.current(fixed ? 'page' : 'scroll')
+        try {
+          const nav = await book.loaded.navigation
+          let list = nav.toc.map(c => ({ label: c.label.trim(), href: c.href }))
+          if (!list.length) { const sp = await book.loaded.spine; list = sp.spineItems.map((x, i) => ({ label: `Section ${i + 1}`, href: x.href })) }
+          setChapters(list)
+        } catch {}
+      } catch (e) {
+        setErr('This EPUB could not be opened (' + (e?.message || e) + '). Use ⬇ to download it instead.')
+      }
     })()
   }, [params.id])
 
-  useEffect(() => {
-    const r = rend.current; if (!r) return
-    r.themes.override('color', tone === 'dark' ? '#f2f2f2' : '#111111', true)
-    r.themes.override('background', 'transparent', true)
-    r.themes.fontSize(size + '%')
-  }, [tone, size, ready])
+  useEffect(() => { applyTheme() }, [tone, size, ready])
 
   const pick = file => {
     const img = new Image()
@@ -93,7 +111,7 @@ export default function Read({ params }) {
           <div className="flex items-center gap-2">
             <button className="btn" onClick={() => router.push('/')}>← Back</button>
             <h1 className="min-w-0 flex-1 truncate font-bold">{item.title}</h1>
-            <button className="btn" onClick={() => download(item)}>⬇</button> 
+            <button className="btn" onClick={() => download(item)}>⬇</button>
             <button className="btn" onClick={() => router.push('/book/' + item.id)}>💬</button>
             {epub && <button className="btn" onClick={() => { setBmOpen(!bmOpen); setPanel(false) }}>🔖</button>}
             {epub && <button className="btn" onClick={() => { setPanel(!panel); setBmOpen(false) }}>⚙</button>}
@@ -124,6 +142,10 @@ export default function Read({ params }) {
           )}
           {panel && (
             <div className="space-y-2 rounded-xl bg-slate-900/90 p-3 text-sm">
+              <div className="flex gap-2">
+                <button className="btn flex-1" onClick={() => openRef.current?.('scroll')}>📜 Scroll view</button>
+                <button className="btn flex-1" onClick={() => openRef.current?.('page')}>📄 Page view</button>
+              </div>
               <label className="btn block text-center">🖼 Choose background photo
                 <input type="file" accept="image/*" hidden onChange={e => e.target.files[0] && pick(e.target.files[0])} />
               </label>
@@ -144,14 +166,15 @@ export default function Read({ params }) {
           )}
         </div>
         <div className="min-h-0 flex-1">
-          {epub ? <div ref={box} className="h-full" />
+          {err ? <p className="p-6 text-red-300">{err}</p>
+            : epub ? <div ref={box} className="h-full" />
             : item.format === 'pdf' && url ? <iframe src={url} className="h-full w-full bg-white" />
             : <p className="p-6 text-white">Preview isn't available for .{item.format} files. Use ⬇ to download.</p>}
         </div>
-        {epub && (
+        {epub && !err && (
           <div className="flex gap-2 bg-black/60 p-3 backdrop-blur" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
-            <button className="btn flex-1" onClick={() => rend.current?.prev()}>← Previous chapter</button>
-            <button className="btn flex-1" onClick={() => rend.current?.next()}>Next chapter →</button>
+            <button className="btn flex-1" onClick={() => rend.current?.prev()}>← Previous</button>
+            <button className="btn flex-1" onClick={() => rend.current?.next()}>Next →</button>
           </div>
         )}
       </div>

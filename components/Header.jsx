@@ -30,6 +30,7 @@ export default function Header() {
         <nav className="mx-auto max-w-5xl space-y-2 px-4 pb-4">
           <L href="/">🏠 Home</L>
           {me?.admin && <L href="/admin">🛠 Admin upload</L>}
+          {me?.admin && <L href="/admin/chapters">➕ Add chapters</L>}
           {me && <L href="/profile">🙂 My profile</L>}
           {me && <L href="/friends">👥 Friends & chat</L>}
           {me && <L href="/chats">💬 Messages</L>}

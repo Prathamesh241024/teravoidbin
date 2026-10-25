@@ -14,7 +14,9 @@ const loadPdfJs = () => new Promise((res, rej) => {
 })
 const splitPos = v => { const i = v.indexOf('|'); return i < 0 ? ['main', v] : [v.slice(0, i), v.slice(i + 1)] }
 
-async function findChapters(pdf) {
+async function findChapters(pdf, cacheKey, alive, emit) {
+  try { const c = JSON.parse(localStorage.getItem(cacheKey) || 'null'); if (c?.length) return emit(c) } catch {}
+  const save = list => { try { if (list.length) localStorage.setItem(cacheKey, JSON.stringify(list)) } catch {} }
   try {
     const out = await pdf.getOutline()
     if (out?.length) {
@@ -26,30 +28,32 @@ async function findChapters(pdf) {
             if (typeof d === 'string') d = await pdf.getDestination(d)
             if (d) list.push({ label: '– '.repeat(depth) + (it.title || 'Section').trim(), page: (typeof d[0] === 'object' ? await pdf.getPageIndex(d[0]) : d[0]) + 1 })
           } catch {}
-          if (it.items?.length && list.length < 300) await walk(it.items, depth + 1)
+          if (it.items?.length) await walk(it.items, depth + 1)
         }
       }
       await walk(out, 0)
-      if (list.length) return list
+      if (list.length) { save(list); return emit(list) }
     }
   } catch {}
   const list = [], seen = new Set()
-  for (let i = 1; i <= pdf.numPages && i <= 800; i++) {
+  for (let i = 1; i <= pdf.numPages; i++) {
+    if (!alive()) return
+    await new Promise(r => setTimeout(r, 50))
     try {
       const tc = await (await pdf.getPage(i)).getTextContent()
       const full = tc.items.map(t => t.str).join(' ').replace(/\s+/g, ' ').trim()
       if ((full.match(/chapter\s*\d+/gi) || []).length > 2) continue
       const m = full.slice(0, 60).match(/^(chapter|ch\.?)\s*(\d+)/i)
-      if (m && !seen.has(m[2])) { seen.add(m[2]); list.push({ label: `Chapter ${m[2]}`, page: i }) }
+      if (m && !seen.has(m[2])) { seen.add(m[2]); list.push({ label: `Chapter ${m[2]}`, page: i }); emit([...list]) }
     } catch {}
   }
-  return list
+  save(list)
 }
 
 export default function Read({ params }) {
   const [item, setItem] = useState(null), [extras, setExtras] = useState([]), [cur, setCur] = useState({ key: 'main', format: '' })
   const [mainChapters, setMainChapters] = useState([]), [err, setErr] = useState(''), [loading, setLoading] = useState(true)
-  const [page, setPage] = useState(1), [pages, setPages] = useState(0), [atEnd, setAtEnd] = useState(false)
+  const [page, setPage] = useState(1), [pages, setPages] = useState(0), [atEnd, setAtEnd] = useState(false), [href, setHref] = useState('')
   const [bg, setBg] = useState(''), [tone, setTone] = useState('dark'), [dim, setDim] = useState(0.6), [size, setSize] = useState(110), [panel, setPanel] = useState(false), [jump, setJump] = useState('')
   const [marks, setMarks] = useState([]), [bmOpen, setBmOpen] = useState(false)
   const box = useRef(), pdfBox = useRef(), rend = useRef(), pdfRef = useRef(), pagesRef = useRef([]), io = useRef(), modeRef = useRef()
@@ -101,7 +105,7 @@ export default function Read({ params }) {
       rend.current = r
       r.on('relocated', l => {
         loc.current = { pos: l.start.cfi, href: l.start.href }
-        setAtEnd(!!l.atEnd)
+        setHref(l.start.href); setAtEnd(!!l.atEnd)
         try { localStorage.setItem(`pos:${data.current.item.id}:${key}`, l.start.cfi) } catch {}
       })
       try { await r.display(at || undefined) } catch { await r.display() }
@@ -124,38 +128,46 @@ export default function Read({ params }) {
     pdfRef.current = pdf; setPages(pdf.numPages)
     const root = pdfBox.current
     const wrap = document.createElement('div')
-    wrap.style.cssText = 'max-width:900px;margin:0 auto;padding:8px'
+    wrap.style.cssText = 'max-width:900px;margin:0 auto;padding:8px;box-sizing:border-box'
     root.appendChild(wrap)
-    const v0 = (await pdf.getPage(1)).getViewport({ scale: 1 })
-    const w = Math.min(root.clientWidth - 16, 884) || 360
+    const w = (wrap.clientWidth - 16) || 340
+    const ratios = []
+    for (let i = 1; i <= pdf.numPages; i += 25) {
+      const n = Math.min(25, pdf.numPages - i + 1)
+      ratios.push(...await Promise.all(Array.from({ length: n }, (_, k) => pdf.getPage(i + k).then(pg => { const v = pg.getViewport({ scale: 1 }); return v.height / v.width }))))
+    }
+    if (pdfRef.current !== pdf) return
     const els = []
     for (let i = 1; i <= pdf.numPages; i++) {
       const d = document.createElement('div')
       d.dataset.p = i
-      d.style.cssText = `background:#fff;margin-bottom:8px;overflow:hidden;height:${Math.round(w * v0.height / v0.width)}px`
+      d.style.cssText = `background:#fff;margin-bottom:8px;overflow:hidden;height:${Math.round(w * ratios[i - 1])}px`
       wrap.appendChild(d); els.push(d)
     }
     pagesRef.current = els
     const draw = async (el, i) => {
       const pg = await pdf.getPage(i), v = pg.getViewport({ scale: 1 })
-      const scale = el.clientWidth / v.width, dpr = Math.min(window.devicePixelRatio || 1, 2)
-      const vp = pg.getViewport({ scale: scale * dpr })
+      const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
+      const vp = pg.getViewport({ scale: (el.clientWidth / v.width) * dpr })
       const c = document.createElement('canvas')
       c.width = vp.width; c.height = vp.height
-      c.style.cssText = 'width:100%;display:block'
-      el.style.height = Math.round(v.height * scale) + 'px'
-      await pg.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise
+      c.style.cssText = 'width:100%;height:100%;display:block'
+      if (!el.dataset.done) return
+      el._task = pg.render({ canvasContext: c.getContext('2d'), viewport: vp })
+      await el._task.promise
       if (el.dataset.done) el.replaceChildren(c)
     }
     io.current = new IntersectionObserver(es => es.forEach(e => {
       const el = e.target
       if (e.isIntersecting && !el.dataset.done) { el.dataset.done = '1'; draw(el, +el.dataset.p).catch(() => {}) }
-      else if (!e.isIntersecting && el.dataset.done) { delete el.dataset.done; el.replaceChildren() }
-    }), { root, rootMargin: '1200px 0px' })
+      else if (!e.isIntersecting && el.dataset.done) { delete el.dataset.done; try { el._task?.cancel() } catch {} el.replaceChildren() }
+    }), { root, rootMargin: '900px 0px' })
     els.forEach(el => io.current.observe(el))
     const start = target && target[0] === 'p' ? parseInt(target.slice(1)) || 1 : 1
     requestAnimationFrame(() => goPage(start))
-    if (key === 'main') findChapters(pdf).then(list => setMainChapters(list.map(c => ({ label: c.label, value: 'main|p' + c.page }))))
+    if (key === 'main') setTimeout(() => {
+      if (pdfRef.current === pdf) findChapters(pdf, 'chap:' + docOf('main').path, () => pdfRef.current === pdf, list => setMainChapters(list.map(c => ({ label: c.label, value: 'main|p' + c.page })))).catch(() => {})
+    }, 1500)
   }
 
   const openDoc = async (key, target) => {
@@ -185,9 +197,14 @@ export default function Read({ params }) {
       if (!(await getMe())) return router.push('/login')
       const { data: it } = await supabase.from('items').select('*').eq('id', params.id).single()
       if (!it) return router.push('/')
-      const { data: ex } = await supabase.from('chapters').select('*').eq('item_id', it.id).order('number', { ascending: true })
-      data.current = { item: it, extras: ex || [] }
-      setItem(it); setExtras(ex || [])
+      let ex = []
+      for (let from = 0; ; from += 1000) {
+        const { data: part } = await supabase.from('chapters').select('*').eq('item_id', it.id).order('number', { ascending: true }).range(from, from + 999)
+        ex = ex.concat(part || [])
+        if (!part || part.length < 1000) break
+      }
+      data.current = { item: it, extras: ex }
+      setItem(it); setExtras(ex)
       supabase.from('events').insert({ item_id: it.id, kind: 'read' }).then(() => {})
       supabase.rpc('award_xp', { k: 'read', r: it.id }).then(() => {})
       supabase.from('bookmarks').select('*').eq('item_id', it.id).order('created_at', { ascending: false }).then(({ data: m }) => setMarks(m || []))
@@ -232,14 +249,7 @@ export default function Read({ params }) {
     const pos = loc.current.pos
     if (!pos) return alert('Scroll a little, then try again.')
     let guess = docOf(cur.key).label
-    if (cur.key === 'main') {
-      if (cur.format === 'pdf') guess = `${item.title} · page ${page}`
-      else {
-        const base = (loc.current.href || '').split('#')[0]
-        const ch = mainChapters.find(c => { const h = c.value.slice(5).split('#')[0]; return base && (h === base || h.endsWith(base) || base.endsWith(h)) })
-        guess = ch?.label || 'Bookmark'
-      }
-    }
+    if (cur.key === 'main') guess = cur.format === 'pdf' ? `${item.title} · page ${page}` : (here?.label || 'Bookmark')
     const label = prompt('Name this bookmark', guess)
     if (label === null) return
     const { data: row, error } = await supabase.from('bookmarks').insert({ item_id: item.id, cfi: `${cur.key}|${pos}`, label: label || 'Bookmark' }).select().single()
@@ -253,6 +263,13 @@ export default function Read({ params }) {
 
   if (!item) return <p className="fixed inset-0 z-40 bg-slate-950 p-6 text-white">Loading…</p>
   const options = [...mainChapters, ...extras.map(x => ({ label: `📘 Chapter ${x.number}${x.title ? ' – ' + x.title : ''}`, value: x.id + '|' }))]
+  const here = (() => {
+    if (cur.key !== 'main') return options.find(o => o.value === cur.key + '|')
+    if (cur.format === 'pdf') return mainChapters.filter(c => (parseInt(c.value.slice(6)) || 0) <= page).pop()
+    const base = (href || '').split('#')[0]
+    const hits = base ? mainChapters.filter(c => { const h = c.value.slice(5).split('#')[0]; return h === base || h.endsWith(base) || base.endsWith(h) }) : []
+    return hits.length === 1 ? hits[0] : undefined
+  })()
   const nextKey = nextKeyOf(cur.key)
   const veil = tone === 'dark' ? `rgba(0,0,0,${dim})` : `rgba(255,255,255,${dim})`
   const title = cur.key === 'main' ? item.title : docOf(cur.key)?.label
@@ -260,7 +277,7 @@ export default function Read({ params }) {
     <div className="fixed inset-0 z-40 flex flex-col" style={{ background: bg ? `url("${bg}") center/cover` : tone === 'dark' ? '#0b0b1a' : '#f5f5f5' }}>
       <div className="absolute inset-0" style={{ background: veil }} />
       <div className="relative z-10 flex h-full flex-col">
-        <div className="max-h-[65vh] space-y-2 overflow-y-auto bg-black/60 p-3 text-white backdrop-blur" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
+        <div className="max-h-[65vh] space-y-2 overflow-y-auto bg-black/80 p-3 text-white" style={{ paddingTop: 'max(0.75rem, env(safe-area-inset-top))' }}>
           <div className="flex items-center gap-2">
             <button className="btn" onClick={() => router.push('/')}>← Back</button>
             <h1 className="min-w-0 flex-1 truncate font-bold">{title}</h1>
@@ -272,15 +289,15 @@ export default function Read({ params }) {
           {options.length > 0 && (
             <div className="flex gap-2">
               <select className="min-w-0 flex-1 rounded-lg bg-slate-800 px-3 py-2 text-sm" defaultValue="" onChange={e => { goChapter(e.target.value); e.target.value = '' }}>
-                <option value="" disabled>📑 Chapters ({options.length})</option>
+                <option value="" disabled>📑 {here?.label || `Chapters (${options.length})`}</option>
                 {options.map((c, i) => <option key={i} value={c.value}>{c.label}</option>)}
               </select>
               <input className="w-16 rounded-lg bg-slate-800 px-2 py-2 text-sm" type="number" min="1" placeholder={cur.format === 'pdf' ? 'page' : '#'} value={jump} onChange={e => setJump(e.target.value)} />
-              <button className="btn" onClick={() => { if (cur.format === 'pdf') goPage(+jump); else { const c = options[jump - 1]; if (c) goChapter(c.value) } }}>Go</button>
+              <button className="btn" onClick={() => { if (cur.format === 'pdf') return goPage(+jump); const x = extras.find(e => e.number === +jump); const c = x ? { value: x.id + '|' } : mainChapters[jump - 1]; if (c) goChapter(c.value) }}>Go</button>
             </div>
           )}
           {bmOpen && (
-            <div className="space-y-2 rounded-xl bg-slate-900/90 p-3 text-sm">
+            <div className="space-y-2 rounded-xl bg-slate-900 p-3 text-sm">
               <button className="btn w-full" onClick={addMark}>🔖 Bookmark this spot</button>
               {marks.length === 0 && <p className="opacity-70">No bookmarks yet.</p>}
               {marks.map(m => (
@@ -294,7 +311,7 @@ export default function Read({ params }) {
             </div>
           )}
           {panel && (
-            <div className="space-y-2 rounded-xl bg-slate-900/90 p-3 text-sm">
+            <div className="space-y-2 rounded-xl bg-slate-900 p-3 text-sm">
               {cur.format === 'epub' && (
                 <div className="flex gap-2">
                   <button className="btn flex-1" onClick={() => modeRef.current?.('scroll', loc.current.pos)}>📜 Scroll view</button>
@@ -329,13 +346,13 @@ export default function Read({ params }) {
           <div ref={pdfBox} onScroll={onPdfScroll} className={cur.format === 'pdf' && !err ? 'relative h-full overflow-y-auto' : 'hidden'} />
         </div>
         {!err && cur.format === 'epub' && (
-          <div className="flex gap-2 bg-black/60 p-3 backdrop-blur" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+          <div className="flex gap-2 bg-black/80 p-3" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
             <button className="btn flex-1" onClick={() => rend.current?.prev()}>← Previous</button>
             <button className="btn flex-1" onClick={() => (atEnd && nextKey ? openDoc(nextKey) : rend.current?.next())}>{atEnd && nextKey ? 'Next chapter →' : 'Next →'}</button>
           </div>
         )}
         {!err && cur.format === 'pdf' && (
-          <div className="flex items-center gap-2 bg-black/60 p-3 text-white backdrop-blur" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
+          <div className="flex items-center gap-2 bg-black/80 p-3 text-white" style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}>
             <button className="btn" onClick={() => goPage(page - 1)}>←</button>
             <span className="flex-1 text-center text-sm">Page {page} / {pages}</span>
             {atEnd && nextKey ? <button className="btn" onClick={() => openDoc(nextKey)}>Next chapter →</button> : <button className="btn" onClick={() => goPage(page + 1)}>→</button>}
